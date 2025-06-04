@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 env:
-  MY_SECRET_PREFIX: Fofiu_Florin_George
   DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
   MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
 
@@ -29,30 +28,37 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Start WordPress stack
+      - name: Start WordPress + MySQL via Docker Compose
         run: |
+          # 1) Create (or reuse) a Docker context that points to the service’s Docker daemon
           docker context create remote --docker "host=tcp://localhost:2375" || true
           docker context use remote
+
+          # 2) Launch the two containers in detached mode
           docker-compose up -d
+
+          # 3) Wait until HTTP 200 on http://localhost:8080 (max 30 attempts)
           for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
+            STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" http://localhost:8080)
             if [ "$STATUS" -eq 200 ]; then
-              echo "WordPress is up!"
+              echo " WordPress is up!"
               break
             fi
-            echo "Waiting for WordPress… ($i/30)"
+            echo " Waiting for WordPress to be ready… ($i/30)"
             sleep 5
           done
 
       - name: Install vulnerable plugin (revslider)
         run: |
+          # Grab the ID of the running WordPress container
           WP_CONTAINER_ID=$(docker ps -qf "ancestor=wordpress:latest")
+          # Inside that container, install & activate revslider via WP-CLI
           docker exec "$WP_CONTAINER_ID" bash -lc "wp plugin install revslider --activate --allow-root"
 
       - name: Pull WPScan Docker image
         run: docker pull wpscanteam/wpscan:latest
 
-      - name: Run WPScan
+      - name: Run WPScan via Docker
         run: |
           docker run --rm \
             --network=host \
@@ -61,6 +67,6 @@ jobs:
             --api-token "${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}" \
             --enumerate vp,vt,u
 
-      - name: Teardown
+      - name: Teardown Docker Compose
         if: always()
         run: docker-compose down -v
