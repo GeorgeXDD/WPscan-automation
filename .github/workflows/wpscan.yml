@@ -27,28 +27,34 @@ jobs:
         run: |
           docker compose up -d
 
-          # Wait until HTTP 200 on http://localhost:8080 (max 30 retries).
-          for i in {1..30}; do
+          # Give MySQL and WordPress a chance to finish their first‐run initialization.
+          # (If needed, bump this to 90 or 120 seconds.)
+          echo "⏳ Sleeping 60 seconds to let DB and WP finish setup…"
+          sleep 60
+
+          # Now do up to 15 more retries (every 5s) to see if WP is returning HTTP 200.
+          for i in {1..15}; do
             STATUS=$(
               curl --silent --output /dev/null \
-                   --write-out "%{http_code}" \
-                   http://localhost:8080 || echo "000"
+                  --write-out "%{http_code}" \
+                  http://localhost:8080 || echo "000"
             )
             if [ "$STATUS" -eq 200 ]; then
               echo "✅ WordPress is up!"
               break
             fi
-            echo "⌛ Waiting for WordPress to be ready… ($i/30)"
+            echo "⌛ Waiting for WordPress… ($i/15)"
             sleep 5
           done
 
           if [ "$STATUS" -ne 200 ]; then
-            echo "::error::WordPress never responded with 200 after 30 tries."
+            echo "::error::WordPress still not responding with 200 after timeout."
             exit 1
           fi
         env:
           DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
+
 
       - name: Install WP-CLI & Vulnerable Plugin (Contact Form 7 5.9.4)
         run: |
