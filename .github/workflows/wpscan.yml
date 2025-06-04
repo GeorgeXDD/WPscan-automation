@@ -10,11 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # MySQL credentials (for docker-compose)
+      # MySQL credentials (used by docker-compose)
       DB_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_DB_PASS }}
       MYSQL_ROOT_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_DB_PASS }}
 
-      # WP-CLI install credentials (pulled from your secrets)
+      # WP-CLI install credentials
       WP_ADMIN_USER: ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_USER }}
       WP_ADMIN_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_PASSWORD }}
       WP_ADMIN_EMAIL: ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_EMAIL }}
@@ -38,7 +38,7 @@ jobs:
           echo "Waiting for WordPress to become available on http://localhost:8080 …"
           for i in {1..30}; do
             if curl -sSf http://localhost:8080 >/dev/null; then
-              echo "✔️ WordPress is up (HTTP 200)."
+              echo "✔️  WordPress is up (HTTP 200)."
               break
             fi
             echo "  → not ready yet (attempt $i/30), retrying in 5s…"
@@ -55,9 +55,7 @@ jobs:
           # 1) Grab the container ID of the running "wordpress" service
           WP_CONTAINER=$(docker-compose ps -q wordpress)
 
-          # 2) Run WP-CLI in a separate container, 
-          #    mounting the filesystem of the WordPress container (so wp-config.php ends up in /var/www/html)
-          #    and sharing its network (so "db:3306" resolves correctly).
+          # 2) Run WP-CLI in a separate container, mounting volumes and sharing network
           docker run --rm \
             --volumes-from "$WP_CONTAINER" \
             --network "container:$WP_CONTAINER" \
@@ -66,14 +64,14 @@ jobs:
             -e WORDPRESS_DB_PASSWORD="${DB_PASSWORD}" \
             -e WORDPRESS_DB_NAME="wordpress" \
             wordpress:cli \
-              core install \
+              wp core install \
                 --url="http://localhost:8080" \
                 --title="Test Site" \
                 --admin_user="${WP_ADMIN_USER}" \
                 --admin_password="${WP_ADMIN_PASSWORD}" \
                 --admin_email="${WP_ADMIN_EMAIL}"
 
-          echo "✔️ WordPress installed (admin user: ${WP_ADMIN_USER})."
+          echo "✔️  WordPress installed (admin user: ${WP_ADMIN_USER})."
 
       - name: Run WPScan against http://localhost:8080
         run: |
