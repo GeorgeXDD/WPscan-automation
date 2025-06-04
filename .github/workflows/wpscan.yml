@@ -30,7 +30,7 @@ jobs:
           # Give MySQL and WordPress a chance to finish their first‐run initialization.
           # (If needed, bump this to 90 or 120 seconds.)
           echo "⏳ Sleeping 60 seconds to let DB and WP finish setup…"
-          sleep 60
+          sleep 360
 
           # Now do up to 15 more retries (every 5s) to see if WP is returning HTTP 200.
           for i in {1..15}; do
