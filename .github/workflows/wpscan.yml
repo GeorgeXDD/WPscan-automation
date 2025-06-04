@@ -28,16 +28,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Start WordPress + MySQL via Docker Compose
+      - name: Start WordPress + MySQL via Docker Compose V2
         run: |
-          # 1) Create (or reuse) a Docker context that points to the service’s Docker daemon
+          # 1) Create/reuse the remote context for Docker-in-Docker
           docker context create remote --docker "host=tcp://localhost:2375" || true
           docker context use remote
 
-          # 2) Launch the two containers in detached mode
-          docker-compose up -d
+          # 2) Launch the containers in detached mode using 'docker compose'
+          docker compose up -d
 
-          # 3) Wait until HTTP 200 on http://localhost:8080 (max 30 attempts)
+          # 3) Wait until HTTP 200 on http://localhost:8080 (max 30 retries)
           for i in {1..30}; do
             STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" http://localhost:8080)
             if [ "$STATUS" -eq 200 ]; then
@@ -50,9 +50,9 @@ jobs:
 
       - name: Install vulnerable plugin (revslider)
         run: |
-          # Grab the ID of the running WordPress container
+          # Get the WordPress container’s ID
           WP_CONTAINER_ID=$(docker ps -qf "ancestor=wordpress:latest")
-          # Inside that container, install & activate revslider via WP-CLI
+          # Use WP-CLI inside the container to install & activate revslider
           docker exec "$WP_CONTAINER_ID" bash -lc "wp plugin install revslider --activate --allow-root"
 
       - name: Pull WPScan Docker image
@@ -67,6 +67,6 @@ jobs:
             --api-token "${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}" \
             --enumerate vp,vt,u
 
-      - name: Teardown Docker Compose
+      - name: Teardown Docker Compose V2
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
