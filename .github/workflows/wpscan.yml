@@ -28,16 +28,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Start WordPress + MySQL via Docker Compose V2
-        run: |
-          # 1) Create/reuse the remote context for Docker-in-Docker
-          docker context create remote --docker "host=tcp://localhost:2375" || true
-          docker context use remote
+      # Export DOCKER_HOST so that `docker` and `docker compose` use the DIND daemon on port 2375
+      - name: Configure Docker environment
+        run: echo "DOCKER_HOST=tcp://localhost:2375" >> $GITHUB_ENV
 
-          # 2) Launch the containers in detached mode using 'docker compose'
+      - name: Start WordPress + MySQL via Docker Compose
+        run: |
+          # Launch the containers in detached mode
           docker compose up -d
 
-          # 3) Wait until HTTP 200 on http://localhost:8080 (max 30 retries)
+          # Wait until HTTP 200 on http://localhost:8080 (max 30 retries)
           for i in {1..30}; do
             STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" http://localhost:8080)
             if [ "$STATUS" -eq 200 ]; then
@@ -47,16 +47,21 @@ jobs:
             echo " Waiting for WordPress to be ready… ($i/30)"
             sleep 5
           done
+        env:
+          DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
 
       - name: Install vulnerable plugin (revslider)
         run: |
-          # Get the WordPress container’s ID
           WP_CONTAINER_ID=$(docker ps -qf "ancestor=wordpress:latest")
-          # Use WP-CLI inside the container to install & activate revslider
           docker exec "$WP_CONTAINER_ID" bash -lc "wp plugin install revslider --activate --allow-root"
+        env:
+          DOCKER_HOST: tcp://localhost:2375
 
       - name: Pull WPScan Docker image
         run: docker pull wpscanteam/wpscan:latest
+        env:
+          DOCKER_HOST: tcp://localhost:2375
 
       - name: Run WPScan via Docker
         run: |
@@ -66,7 +71,12 @@ jobs:
             --url http://host.docker.internal:8080 \
             --api-token "${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}" \
             --enumerate vp,vt,u
+        env:
+          DOCKER_HOST: tcp://localhost:2375
 
-      - name: Teardown Docker Compose V2
+      - name: Teardown Docker Compose
         if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v
+        env:
+          DOCKER_HOST: tcp://localhost:2375
