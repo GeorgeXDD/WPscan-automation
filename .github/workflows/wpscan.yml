@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # MySQL credentials (used by docker-compose)
+      # MySQL credentials (for docker-compose)
       DB_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_DB_PASS }}
       MYSQL_ROOT_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_DB_PASS }}
 
@@ -52,10 +52,8 @@ jobs:
 
       - name: Install WordPress via WP-CLI (using wordpress:cli)
         run: |
-          # 1) Grab the container ID of the running "wordpress" service
           WP_CONTAINER=$(docker-compose ps -q wordpress)
 
-          # 2) Run WP-CLI in a separate container, mounting volumes and sharing network
           docker run --rm \
             --volumes-from "$WP_CONTAINER" \
             --network "container:$WP_CONTAINER" \
@@ -72,6 +70,15 @@ jobs:
                 --admin_email="${WP_ADMIN_EMAIL}"
 
           echo "✔️  WordPress installed (admin user: ${WP_ADMIN_USER})."
+
+      - name: Install a vulnerable plugin (Contact Form 7 v3.5)
+        run: |
+          WP_CONTAINER=$(docker-compose ps -q wordpress)
+
+          # Contact Form 7 v3.5 is known to have multiple vulnerabilities.
+          docker exec $WP_CONTAINER wp plugin install contact-form-7 --version=3.5 --activate
+
+          echo "✔️  Installed Contact Form 7 v3.5 (vulnerable)."
 
       - name: Run WPScan against http://localhost:8080
         run: |
