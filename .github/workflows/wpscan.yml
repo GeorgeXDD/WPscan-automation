@@ -1,11 +1,8 @@
-name: "WPScan Automation"
+name: "WPScan Automation v2"
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
-
+  
 env:
   DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
   MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
@@ -13,70 +10,56 @@ env:
 jobs:
   wpscan:
     runs-on: ubuntu-latest
-
+    
     services:
       docker:
-        image: docker:20.10
+        image: docker:dind
         options: --privileged
         ports:
           - 2375:2375
+        env:
+          DOCKER_TLS_CERTDIR: ""
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      # Export DOCKER_HOST so that `docker` and `docker compose` use the DIND daemon on port 2375
-      - name: Configure Docker environment
-        run: echo "DOCKER_HOST=tcp://localhost:2375" >> $GITHUB_ENV
-
-      - name: Start WordPress + MySQL via Docker Compose
+      - name: Docker setup
         run: |
-          # Launch the containers in detached mode
-          docker compose up -d
+          docker context create remote --docker "host=tcp://docker:2375" || true
+          docker context use remote
+          export DOCKER_HOST=tcp://docker:2375
 
-          # Wait until HTTP 200 on http://localhost:8080 (max 30 retries)
+      - name: Start WordPress stack
+        run: |
+          docker compose --project-directory . up -d
+          
+          # Health check with 30 retries
           for i in {1..30}; do
-            STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" http://localhost:8080)
-            if [ "$STATUS" -eq 200 ]; then
-              echo " WordPress is up!"
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:8080 | grep -q 200; then
+              echo "WordPress ready"
               break
             fi
-            echo " Waiting for WordPress to be ready… ($i/30)"
+            echo "Waiting for WordPress ($i/30)..."
             sleep 5
           done
-        env:
-          DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
-          MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
 
-      - name: Install vulnerable plugin (revslider)
+      - name: Install vulnerable components
         run: |
-          WP_CONTAINER_ID=$(docker ps -qf "ancestor=wordpress:latest")
-          docker exec "$WP_CONTAINER_ID" bash -lc "wp plugin install revslider --activate --allow-root"
-        env:
-          DOCKER_HOST: tcp://localhost:2375
+          WP_CONTAINER=$(docker ps -qf "ancestor=wordpress:6.5")
+          docker exec $WP_CONTAINER wp plugin install revslider --activate --allow-root
+          docker exec $WP_CONTAINER wp theme install twentyfifteen --activate --allow-root
 
-      - name: Pull WPScan Docker image
-        run: docker pull wpscanteam/wpscan:latest
-        env:
-          DOCKER_HOST: tcp://localhost:2375
-
-      - name: Run WPScan via Docker
+      - name: Run WPScan
         run: |
           docker run --rm \
-            --network=host \
+            --network host \
             wpscanteam/wpscan:latest \
             --url http://host.docker.internal:8080 \
             --api-token "${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}" \
-            --enumerate vp,vt,u
-        env:
-          DOCKER_HOST: tcp://localhost:2375
+            --enumerate vp,vt,u \
+            --plugins-detection mixed
 
-      - name: Teardown Docker Compose
+      - name: Teardown
         if: always()
-        run: |
-          docker compose down -v
-        env:
-          DOCKER_HOST: tcp://localhost:2375
+        run: docker compose down -v
