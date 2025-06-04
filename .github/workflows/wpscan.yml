@@ -90,6 +90,7 @@ jobs:
               --enumerate ap,at,u \
               --disable-tls-checks
 
+
       - name: Tear down Docker Compose
         if: ${{ always() }}
         run: docker-compose down
