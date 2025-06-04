@@ -8,8 +8,8 @@ on:
 
 env:
   MY_SECRET_PREFIX: Fofiu_Florin_George
-  DB_PASSWORD: ${{ secrets[ env.MY_SECRET_PREFIX + '_DB_PASS' ] }}
-  MYSQL_ROOT_PASSWORD: ${{ secrets[ env.MY_SECRET_PREFIX + '_DB_PASS' ] }}
+  DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
+  MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
 
 jobs:
   wpscan:
@@ -58,7 +58,7 @@ jobs:
             --network=host \
             wpscanteam/wpscan:latest \
             --url http://host.docker.internal:8080 \
-            --api-token "${{ secrets[ env.MY_SECRET_PREFIX + '_WPSCAN_API_TOKEN' ] }}" \
+            --api-token "${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}" \
             --enumerate vp,vt,u
 
       - name: Teardown
