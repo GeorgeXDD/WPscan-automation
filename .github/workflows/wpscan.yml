@@ -50,7 +50,7 @@ jobs:
           # if [ "$STATUS" -ne 200 ]; then
           #   echo "::error::WordPress still not responding with 200 after timeout."
           #   exit 1
-          fi
+          # fi
         env:
           DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
