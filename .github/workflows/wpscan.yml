@@ -9,9 +9,14 @@ jobs:
   wpscan:
     runs-on: ubuntu-latest
     env:
-      # these flow into docker-compose.yml and into the WPScan container
       DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
       MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
+
+      # pull WP admin creds from your new secrets:
+      WP_ADMIN_USER: ${{ secrets.Fofiu_Florin_George_WP_ADMIN_USER }}
+      WP_ADMIN_PASSWORD: ${{ secrets.Fofiu_Florin_George_WP_ADMIN_PASSWORD }}
+      WP_ADMIN_EMAIL: ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_EMAIL }}
+
       WPSCAN_API_TOKEN: ${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}
 
     steps:
@@ -26,23 +31,32 @@ jobs:
       - name: Start WordPress stack and wait for HTTP 200
         run: |
           docker-compose up -d
-          echo "Waiting for WordPress to become available on http://localhost:8080 …"
+          echo "Waiting for WP…"
           for i in {1..30}; do
             if curl -sSf http://localhost:8080 >/dev/null; then
-              echo "✔️  WordPress is up (HTTP 200)."
+              echo "✔️ WordPress is up"
               break
             fi
-            echo "  → not ready yet (attempt $i/30), retrying in 5s…"
+            echo "→ retry $i/30…"
             sleep 5
           done
-
-          # after 30 tries, check one more time; if still not 200, exit 1
           if ! curl -sSf http://localhost:8080 >/dev/null; then
-            echo "❌ WordPress did not become available in time (after 30 retries)."
+            echo "❌ WP never became available."
             exit 1
           fi
 
-      - name: Run WPScan against http://localhost:8080
+      - name: Install WordPress via WP-CLI
+        run: |
+          WP_CONTAINER=$(docker-compose ps -q wordpress)
+          docker exec $WP_CONTAINER wp core install \
+            --url="http://localhost:8080" \
+            --title="Test Site" \
+            --admin_user="${WP_ADMIN_USER}" \
+            --admin_password="${WP_ADMIN_PASSWORD}" \
+            --admin_email="${WP_ADMIN_EMAIL}"
+          echo "✔️ WP installed (admin:'${WP_ADMIN_USER}')"
+
+      - name: Run WPScan
         run: |
           docker run --rm --network host \
             -e WPSCAN_API_TOKEN="${WPSCAN_API_TOKEN}" \
@@ -52,6 +66,6 @@ jobs:
               --enumerate ap,at,cb,dbe,u \
               --disable-tls-checks
 
-      - name: Tear down Docker Compose
+      - name: Tear down
         if: ${{ always() }}
         run: docker-compose down
