@@ -29,16 +29,26 @@ jobs:
           # Launch the containers in detached mode
           docker compose up -d
 
-          # Wait until HTTP 200 on http://localhost:8080 (max 30 retries)
+          # Wait until HTTP 200 on http://localhost:8080 (max 30 retries).
+          # Use "|| echo 000" so that curl’s non-zero exit codes don't kill the script.
           for i in {1..30}; do
-            STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" http://localhost:8080)
+            STATUS=$(
+              curl --silent --output /dev/null \
+                  --write-out "%{http_code}" \
+                  http://localhost:8080 || echo "000"
+            )
             if [ "$STATUS" -eq 200 ]; then
-              echo "WordPress is up!"
+              echo "✅ WordPress is up!"
               break
             fi
-            echo "Waiting for WordPress to be ready… ($i/30)"
+            echo "⌛ Waiting for WordPress to be ready… ($i/30)"
             sleep 5
           done
+
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::WordPress never responded with 200 after 30 tries."
+            exit 1
+          fi
         env:
           DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
