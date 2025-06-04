@@ -9,10 +9,9 @@ jobs:
   wpscan:
     runs-on: ubuntu-latest
     env:
-      # these will be injected into docker-compose.yml for db and wp
+      # these flow into docker-compose.yml and into the WPScan container
       DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
       MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
-      # WPScan API token (needed for enumeration beyond the free rate-limit)
       WPSCAN_API_TOKEN: ${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}
 
     steps:
@@ -24,19 +23,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Start WordPress stack
+      - name: Start WordPress stack and wait for HTTP 200
         run: |
           docker-compose up -d
           echo "Waiting for WordPress to become available on http://localhost:8080 …"
           for i in {1..30}; do
-            status_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
-            if [ "$status_code" -eq 200 ]; then
+            if curl -sSf http://localhost:8080 >/dev/null; then
               echo "✔️  WordPress is up (HTTP 200)."
               break
             fi
-            echo "  → not ready yet (status $status_code), retrying in 5s…"
+            echo "  → not ready yet (attempt $i/30), retrying in 5s…"
             sleep 5
           done
+
+          # after 30 tries, check one more time; if still not 200, exit 1
+          if ! curl -sSf http://localhost:8080 >/dev/null; then
+            echo "❌ WordPress did not become available in time (after 30 retries)."
+            exit 1
+          fi
 
       - name: Run WPScan against http://localhost:8080
         run: |
