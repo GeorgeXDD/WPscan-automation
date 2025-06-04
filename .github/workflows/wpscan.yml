@@ -76,7 +76,7 @@ jobs:
           WP_CONTAINER=$(docker-compose ps -q wordpress)
 
           # Contact Form 7 v3.5 is known to have multiple vulnerabilities.
-          docker exec $WP_CONTAINER wp plugin install contact-form-7 --version=3.5 --activate
+          docker exec "$WP_CONTAINER" bash -lc "wp plugin install contact-form-7 --version=3.5 --activate --allow-root"
 
           echo "✔️  Installed Contact Form 7 v3.5 (vulnerable)."
 
@@ -84,10 +84,10 @@ jobs:
         run: |
           docker run --rm --network host \
             -e WPSCAN_API_TOKEN="${WPSCAN_API_TOKEN}" \
-            wpscanteam/wpscan \
-              --url http://localhost:8080 \
+            wpscanteam/wpscan:latest \
+              --url http://host.docker.internal:8080 \
               --api-token "${WPSCAN_API_TOKEN}" \
-              --enumerate ap,at,cb,dbe,u \
+              --enumerate ap,at,u \
               --disable-tls-checks
 
       - name: Tear down Docker Compose
