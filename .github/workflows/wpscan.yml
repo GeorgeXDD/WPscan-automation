@@ -18,7 +18,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # No need to set up Docker; ubuntu-latest already has Docker & Compose v2
       - name: Verify Docker & Docker Compose
         run: |
           docker version
@@ -26,16 +25,14 @@ jobs:
 
       - name: Start WordPress + MySQL via Docker Compose
         run: |
-          # Launch the containers in detached mode
           docker compose up -d
 
           # Wait until HTTP 200 on http://localhost:8080 (max 30 retries).
-          # Use "|| echo 000" so that curl’s non-zero exit codes don't kill the script.
           for i in {1..30}; do
             STATUS=$(
               curl --silent --output /dev/null \
-                  --write-out "%{http_code}" \
-                  http://localhost:8080 || echo "000"
+                   --write-out "%{http_code}" \
+                   http://localhost:8080 || echo "000"
             )
             if [ "$STATUS" -eq 200 ]; then
               echo "✅ WordPress is up!"
@@ -53,14 +50,22 @@ jobs:
           DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
 
-      - name: Install vulnerable plugin (RevSlider)
+      - name: Install WP-CLI & Vulnerable Plugin (Contact Form 7 5.9.4)
         run: |
+          # Find the WordPress container (must be the official wordpress:latest image)
           WP_CONTAINER_ID=$(docker ps -qf "ancestor=wordpress:latest")
           if [ -z "$WP_CONTAINER_ID" ]; then
             echo "Error: WordPress container not found."
             exit 1
           fi
-          docker exec "$WP_CONTAINER_ID" bash -lc "wp plugin install revslider --activate --allow-root"
+
+          # Install WP-CLI in the container
+          docker exec "$WP_CONTAINER_ID" bash -lc "curl -sSL https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /usr/local/bin/wp && chmod +x /usr/local/bin/wp"
+
+          # Use WP-CLI to install Contact Form 7 v5.9.4 (known vulnerabilities)
+          docker exec "$WP_CONTAINER_ID" bash -lc "\
+            wp --path=/var/www/html plugin install contact-form-7 --version=5.9.4 --activate --allow-root \
+          "
         env:
           DB_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.Fofiu_Florin_George_DB_PASS }}
@@ -68,15 +73,17 @@ jobs:
       - name: Pull WPScan Docker image
         run: docker pull wpscanteam/wpscan:latest
 
-      - name: Run WPScan via Docker
+      - name: Run WPScan via Docker (aggressive plugin enumeration)
         run: |
           docker run --rm \
             --network=host \
             wpscanteam/wpscan:latest \
             --url http://host.docker.internal:8080 \
             --api-token "${{ secrets.Fofiu_Florin_George_WPSCAN_API_TOKEN }}" \
-            --enumerate vp,vt,u
-          # We specify `--network=host` so that “host.docker.internal” resolves to the runner's localhost.
+            --enumerate ap,at,u
+        # -e ap = all plugins (active + inactive)
+        # -e at = all themes
+        # -e u  = user enumeration
 
       - name: Teardown Docker Compose
         if: always()
