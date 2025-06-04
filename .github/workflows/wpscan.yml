@@ -1,0 +1,66 @@
+name: "WPScan Automation"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  MY_SECRET_PREFIX: Fofiu_Florin_George
+  DB_PASSWORD: ${{ secrets.${{ env.MY_SECRET_PREFIX }}_DB_PASS }}
+  MYSQL_ROOT_PASSWORD: ${{ secrets.${{ env.MY_SECRET_PREFIX }}_DB_PASS }}
+
+jobs:
+  wpscan:
+    runs-on: ubuntu-latest
+
+    services:
+      docker:
+        image: docker:20.10
+        options: --privileged
+        ports:
+          - 2375:2375
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Start WordPress stack
+        run: |
+          docker context create remote --docker "host=tcp://localhost:2375" || true
+          docker context use remote
+          docker-compose up -d
+          for i in {1..30}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
+            if [ "$STATUS" -eq 200 ]; then
+              echo "WordPress is up!"
+              break
+            fi
+            echo "Waiting for WordPress… ($i/30)"
+            sleep 5
+          done
+
+      - name: Install vulnerable plugin (revslider)
+        run: |
+          WP_CONTAINER_ID=$(docker ps -qf "ancestor=wordpress:latest")
+          docker exec "$WP_CONTAINER_ID" bash -lc "wp plugin install revslider --activate --allow-root"
+
+      - name: Pull WPScan Docker image
+        run: docker pull wpscanteam/wpscan:latest
+
+      - name: Run WPScan
+        run: |
+          docker run --rm \
+            --network=host \
+            wpscanteam/wpscan:latest \
+            --url http://host.docker.internal:8080 \
+            --api-token "${{ secrets.${{ env.MY_SECRET_PREFIX }}_WPSCAN_API_TOKEN }}" \
+            --enumerate vp,vt,u
+
+      - name: Teardown
+        if: always()
+        run: docker-compose down -v
