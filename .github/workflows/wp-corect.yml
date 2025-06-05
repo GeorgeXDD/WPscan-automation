@@ -115,7 +115,7 @@ jobs:
           "
           echo "✔️ 'hello-dolly' plugin installed and activated."
 
-      - name: Final sanity check: list installed plugins
+      - name: Final sanity check list installed plugins
         run: |
           echo "→ Listing installed plugins…"
           docker-compose exec -T wordpress bash -lc "\
