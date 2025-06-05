@@ -1,4 +1,4 @@
-name: WordPress Setup (No Vulnerability Scan)
+name: WordPress Setup (With WPScan)
 
 on:
   push:
@@ -16,6 +16,7 @@ jobs:
       WP_ADMIN_USER:       ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_USER }}
       WP_ADMIN_PASSWORD:   ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_PASSWORD }}
       WP_ADMIN_EMAIL:      ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_EMAIL }}
+      WPSCAN_API_TOKEN:    ${{ secrets.FOFIU_FLORIN_GEORGE_WPSCAN_API_TOKEN }}
 
     steps:
       - name: Check out repository
@@ -57,14 +58,14 @@ jobs:
           echo "→ Waiting for WordPress HTTP/200 at http://localhost:8080 …"
           for i in {1..30}; do
             if curl -sSf http://localhost:8080 >/dev/null; then
-              echo "✔️ WordPress is serving HTTP 200."
+              echo "✔️ WordPress is serving HTTP/200."
               break
             fi
             echo "  → WordPress not serving yet (attempt $i/30), retrying in 5s…"
             sleep 5
           done
           if ! curl -sSf http://localhost:8080 >/dev/null; then
-            echo "❌ WordPress front‐end did not serve HTTP 200 in time."
+            echo "❌ WordPress front‐end did not serve HTTP/200 in time."
             docker-compose logs wordpress || true
             exit 1
           fi
@@ -99,7 +100,7 @@ jobs:
         run: |
           echo "→ Verifying WordPress front‐end post-install…"
           if curl -sSf http://localhost:8080 >/dev/null; then
-            echo "✔️ WordPress is still serving HTTP 200."
+            echo "✔️ WordPress is still serving HTTP/200."
           else
             echo "❌ WordPress is not serving after install—dumping logs:"
             docker-compose logs wordpress || true
@@ -108,18 +109,33 @@ jobs:
 
       - name: Install a benign plugin (Hello Dolly)
         run: |
-          echo "→ Installing ‘hello-dolly’ plugin …"
+          echo "→ Installing 'hello-dolly' plugin …"
           docker-compose exec -T wordpress bash -lc "\
             wp plugin install hello-dolly --activate --allow-root \
           "
-          echo "✔️ ‘hello-dolly’ plugin installed and activated."
+          echo "✔️ 'hello-dolly' plugin installed and activated."
 
-      - name: Final sanity check list installed plugins
+      - name: Final sanity check: list installed plugins
         run: |
           echo "→ Listing installed plugins…"
           docker-compose exec -T wordpress bash -lc "\
             wp plugin list --allow-root \
           "
+
+      - name: Run WPScan against the local site
+        continue-on-error: true
+        run: |
+          echo "→ Running WPScan …"
+          WP_CONTAINER=$(docker-compose ps -q wordpress)
+          docker run --rm \
+            --network "container:$WP_CONTAINER" \
+            -e WPSCAN_API_TOKEN="${WPSCAN_API_TOKEN}" \
+            wpscanteam/wpscan:latest \
+              --url http://localhost \
+              --api-token "${WPSCAN_API_TOKEN}" \
+              --enumerate ap,at,u \
+              --disable-tls-checks
+          echo "✔️ WPScan step completed."
 
       - name: Tear down Docker Compose
         if: ${{ always() }}
