@@ -39,7 +39,7 @@ jobs:
           echo "Waiting for WordPress on http://localhost:8080 …"
           for i in {1..30}; do
             if curl -sSf http://localhost:8080 >/dev/null; then
-              echo "✔️ WordPress is up (HTTP 200)."
+              echo "✔️  WordPress HTTP 200 reached."
               break
             fi
             echo "  → Not ready yet (attempt $i/30), retrying in 5s…"
@@ -49,6 +49,28 @@ jobs:
           if ! curl -sSf http://localhost:8080 >/dev/null; then
             echo "❌ WordPress did not become available in time."
             docker-compose logs wordpress || true
+            exit 1
+          fi
+
+          # Now wait for MySQL itself to be accepting connections
+          DB_CONTAINER=$(docker-compose ps -q db)
+          echo "Waiting for MySQL to be ready inside container $DB_CONTAINER …"
+          for i in {1..30}; do
+            if docker exec "$DB_CONTAINER" \
+                  mysqladmin ping -h localhost \
+                  -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
+              echo "✔️  MySQL is up and accepting connections."
+              break
+            fi
+            echo "  → MySQL not ready yet (attempt $i/30), retrying in 5s…"
+            sleep 5
+          done
+
+          if ! docker exec "$DB_CONTAINER" \
+                      mysqladmin ping -h localhost \
+                      -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
+            echo "❌ MySQL did not become available in time."
+            docker-compose logs db || true
             exit 1
           fi
 
@@ -74,7 +96,7 @@ jobs:
                 --admin_email="${WP_ADMIN_EMAIL}" \
                 --allow-root
 
-          echo "✔️ WordPress installed (admin user: ${WP_ADMIN_USER})."
+          echo "✔️  WordPress installed (admin user: ${WP_ADMIN_USER})."
 
       - name: Install vulnerable plugin (Contact Form 7 v3.5)
         run: |
@@ -86,7 +108,7 @@ jobs:
             wordpress:cli \
               wp plugin install contact-form-7 --version=3.5 --activate --allow-root
 
-          echo "✔️ Installed Contact Form 7 v3.5"
+          echo "✔️  Installed Contact Form 7 v3.5"
 
       - name: Run WPScan against the local site
         run: |
