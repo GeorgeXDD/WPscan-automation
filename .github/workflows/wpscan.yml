@@ -1,4 +1,4 @@
-name: WordPress WPScan
+name: WordPress WPScan (Two Sites, Shared Secrets)
 
 on:
   push:
@@ -10,17 +10,15 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # MySQL credentials (for docker-compose)
-      DB_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_DB_PASS }}
+      # — Use the same existing secrets for BOTH Site 1 and Site 2 —
+      DB_PASSWORD:     ${{ secrets.FOFIU_FLORIN_GEORGE_DB_PASS }}
       MYSQL_ROOT_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_DB_PASS }}
 
-      # WP-CLI install credentials
-      WP_ADMIN_USER: ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_USER }}
+      WP_ADMIN_USER:     ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_USER }}
       WP_ADMIN_PASSWORD: ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_PASSWORD }}
-      WP_ADMIN_EMAIL: ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_EMAIL }}
+      WP_ADMIN_EMAIL:    ${{ secrets.FOFIU_FLORIN_GEORGE_WP_ADMIN_EMAIL }}
 
-      # WPScan API token
-      WPSCAN_API_TOKEN: ${{ secrets.FOFIU_FLORIN_GEORGE_WPSCAN_API_TOKEN }}
+      WPSCAN_API_TOKEN:  ${{ secrets.FOFIU_FLORIN_GEORGE_WPSCAN_API_TOKEN }}
 
     steps:
       - name: Check out repository
@@ -31,117 +29,196 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Start WordPress + MySQL via Docker Compose
+      - name: Start both WordPress + MySQL stacks
         working-directory: .
         run: |
+          # Launch db1/wordpress1 (8080) and db2/wordpress2 (8081)
           docker-compose up -d
 
-          # Show which containers are running, for debugging
+          echo "→ Currently running containers:"
           docker-compose ps
 
-          # 1) Wait for MySQL to be fully ready
-          DB_CONTAINER=$(docker-compose ps -q db)
-          echo "→ Waiting for MySQL inside container $DB_CONTAINER …"
+          # ————— Wait for MySQL in db1 —————
+          DB1_CONTAINER=$(docker-compose ps -q db1)
+          echo "→ Waiting for MySQL (db1) in container $DB1_CONTAINER …"
           for i in {1..60}; do
-            if docker exec "$DB_CONTAINER" \
+            if docker exec "$DB1_CONTAINER" \
                  mysqladmin ping -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
-              echo "✔️  MySQL is up (responding to mysqladmin ping)."
+              echo "✔️  MySQL (db1) is up."
               break
             fi
-            echo "  → MySQL not ready (attempt $i/60), retrying in 5s…"
+            echo "  → db1 not ready (attempt $i/60), retrying in 5s…"
             sleep 5
           done
 
-          if ! docker exec "$DB_CONTAINER" \
+          if ! docker exec "$DB1_CONTAINER" \
                       mysqladmin ping -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
-            echo "❌ MySQL did not become ready in time."
-            docker-compose logs db || true
+            echo "❌ MySQL (db1) did not become ready in time."
+            docker-compose logs db1 || true
             exit 1
           fi
 
-          # 2) Wait for WordPress+PHP to serve HTTP/200 on port 8080
-          echo "→ Waiting for WordPress front-end on http://localhost:8080 …"
-          for i in {1..30}; do
-            if curl -sSf http://localhost:8080 >/dev/null; then
-              echo "✔️  WordPress HTTP/200 reached."
+          # ————— Wait for MySQL in db2 —————
+          DB2_CONTAINER=$(docker-compose ps -q db2)
+          echo "→ Waiting for MySQL (db2) in container $DB2_CONTAINER …"
+          for i in {1..60}; do
+            if docker exec "$DB2_CONTAINER" \
+                 mysqladmin ping -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
+              echo "✔️  MySQL (db2) is up."
               break
             fi
-            echo "  → Not serving yet (attempt $i/30), retrying in 5s…"
+            echo "  → db2 not ready (attempt $i/60), retrying in 5s…"
+            sleep 5
+          done
+
+          if ! docker exec "$DB2_CONTAINER" \
+                      mysqladmin ping -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
+            echo "❌ MySQL (db2) did not become ready in time."
+            docker-compose logs db2 || true
+            exit 1
+          fi
+
+          # ————— Wait for wordpress1 (port 8080) —————
+          echo "→ Waiting for WordPress1 at http://localhost:8080 to return HTTP/200 …"
+          for i in {1..30}; do
+            if curl -sSf http://localhost:8080 >/dev/null; then
+              echo "✔️  WordPress1 is up."
+              break
+            fi
+            echo "  → WordPress1 not serving yet (attempt $i/30), retrying in 5s…"
             sleep 5
           done
 
           if ! curl -sSf http://localhost:8080 >/dev/null; then
-            echo "❌ WordPress front-end did not serve HTTP/200 in time."
-            docker-compose logs wordpress || true
+            echo "❌ WordPress1 did not serve HTTP/200 in time."
+            docker-compose logs wordpress1 || true
             exit 1
           fi
 
-      - name: Install WP-CLI inside the WordPress container
-        run: |
-          WP_CONTAINER=$(docker-compose ps -q wordpress)
-          echo "→ Installing WP-CLI inside wordpress container ($WP_CONTAINER) …"
+          # ————— Wait for wordpress2 (port 8081) —————
+          echo "→ Waiting for WordPress2 at http://localhost:8081 to return HTTP/200 …"
+          for i in {1..30}; do
+            if curl -sSf http://localhost:8081 >/dev/null; then
+              echo "✔️  WordPress2 is up."
+              break
+            fi
+            echo "  → WordPress2 not serving yet (attempt $i/30), retrying in 5s…"
+            sleep 5
+          done
 
-          # Using docker-compose exec -T to avoid TTY issues in Actions
-          docker-compose exec -T wordpress bash -lc "\
+          if ! curl -sSf http://localhost:8081 >/dev/null; then
+            echo "❌ WordPress2 did not serve HTTP/200 in time."
+            docker-compose logs wordpress2 || true
+            exit 1
+          fi
+
+      - name: Install WP-CLI in both WordPress containers
+        run: |
+          echo "→ Installing WP-CLI inside wordpress1 …"
+          docker-compose exec -T wordpress1 bash -lc "\
             curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
             chmod +x wp-cli.phar && \
             mv wp-cli.phar /usr/local/bin/wp && \
             wp --info \
           "
-          echo "✔️  WP-CLI is now installed inside the WordPress container."
+          echo "✔️ WP-CLI is now installed in wordpress1."
 
-      - name: Install WordPress core via WP-CLI
+          echo "→ Installing WP-CLI inside wordpress2 …"
+          docker-compose exec -T wordpress2 bash -lc "\
+            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
+            chmod +x wp-cli.phar && \
+            mv wp-cli.phar /usr/local/bin/wp && \
+            wp --info \
+          "
+          echo "✔️ WP-CLI is now installed in wordpress2."
+
+      - name: Install WordPress core on both sites
         run: |
-          echo "→ Running wp core install…"
-
-          # “docker-compose exec” will run inside the same network as 'db' because
-          # docker-compose automatically attaches each service to a user-defined network.
-          docker-compose exec -T wordpress bash -lc "\
+          echo "→ Running wp core install on wordpress1 …"
+          docker-compose exec -T wordpress1 bash -lc "\
             wp core install \
-              --url=http://localhost \
-              --title='Test Site' \
+              --url=http://localhost:8080 \
+              --title='Test Site 1' \
               --admin_user='${WP_ADMIN_USER}' \
               --admin_password='${WP_ADMIN_PASSWORD}' \
               --admin_email='${WP_ADMIN_EMAIL}' \
               --allow-root \
           "
-          echo "✔️  WordPress installed (admin user: ${WP_ADMIN_USER})."
+          echo "✔️ WordPress1 installed (admin: ${WP_ADMIN_USER})."
 
-      - name: (Optional) Verify WordPress front-end again
+          echo "→ Running wp core install on wordpress2 …"
+          docker-compose exec -T wordpress2 bash -lc "\
+            wp core install \
+              --url=http://localhost:8081 \
+              --title='Test Site 2' \
+              --admin_user='${WP_ADMIN_USER}' \
+              --admin_password='${WP_ADMIN_PASSWORD}' \
+              --admin_email='${WP_ADMIN_EMAIL}' \
+              --allow-root \
+          "
+          echo "✔️ WordPress2 installed (admin: ${WP_ADMIN_USER})."
+
+      - name: (Optional) Verify both front-ends again
         run: |
-          echo "→ Verifying that WordPress still serves…"
+          echo "→ Verifying WordPress1 (http://localhost:8080) …"
           if curl -sSf http://localhost:8080 >/dev/null; then
-            echo "✔️  WordPress front-end confirmed."
+            echo "✔️ WordPress1 front-end OK."
           else
-            echo "❌ WordPress is not serving after install—dumping logs:"
-            docker-compose logs wordpress || true
+            echo "❌ WordPress1 not serving after install—dumping logs:"
+            docker-compose logs wordpress1 || true
             exit 1
           fi
 
-      - name: Install vulnerable plugin (Contact Form 7 v3.5)
+          echo "→ Verifying WordPress2 (http://localhost:8081) …"
+          if curl -sSf http://localhost:8081 >/dev/null; then
+            echo "✔️ WordPress2 front-end OK."
+          else
+            echo "❌ WordPress2 not serving after install—dumping logs:"
+            docker-compose logs wordpress2 || true
+            exit 1
+          fi
+
+      - name: Install vulnerable plugins on each site
         run: |
-          echo "→ Installing Contact Form 7 v3.5 …"
-          docker-compose exec -T wordpress bash -lc "\
+          echo "→ Installing Contact Form 7 v3.5 on wordpress1 …"
+          docker-compose exec -T wordpress1 bash -lc "\
             wp plugin install contact-form-7 --version=3.5 --activate --allow-root \
           "
-          echo "✔️  Installed Contact Form 7 v3.5 (vulnerable)."
+          echo "✔️ Installed Contact Form 7 v3.5 on wordpress1."
 
-      - name: Run WPScan against the local site
+          echo "→ Installing RevSlider v4.5.0 on wordpress2 …"
+          docker-compose exec -T wordpress2 bash -lc "\
+            wp plugin install revslider --version=4.5.0 --activate --allow-root \
+          "
+          echo "✔️ Installed RevSlider v4.5.0 on wordpress2."
+
+      - name: Run WPScan against both sites
         run: |
-          echo "→ Running WPScan …"
-          WP_CONTAINER=$(docker-compose ps -q wordpress)
-
+          echo "→ Running WPScan on Site 1 (http://localhost:8080) …"
+          WP1_CONTAINER=$(docker-compose ps -q wordpress1)
           docker run --rm \
-            --network "container:$WP_CONTAINER" \
+            --network "container:$WP1_CONTAINER" \
             -e WPSCAN_API_TOKEN="${WPSCAN_API_TOKEN}" \
             wpscanteam/wpscan:latest \
-              --url http://localhost \
+              --url http://localhost:8080 \
               --api-token "${WPSCAN_API_TOKEN}" \
               --enumerate ap,at,u \
-              --disable-tls-checks
+              --disable-tls-checks || true
 
-      - name: Tear down Docker Compose
+          echo
+          echo "→ Running WPScan on Site 2 (http://localhost:8081) …"
+          WP2_CONTAINER=$(docker-compose ps -q wordpress2)
+          docker run --rm \
+            --network "container:$WP2_CONTAINER" \
+            -e WPSCAN_API_TOKEN="${WPSCAN_API_TOKEN}" \
+            wpscanteam/wpscan:latest \
+              --url http://localhost:8081 \
+              --api-token "${WPSCAN_API_TOKEN}" \
+              --enumerate ap,at,u \
+              --disable-tls-checks || true
+
+      - name: Tear down both Docker stacks
         if: ${{ always() }}
         run: |
           docker-compose down --volumes
-          echo "✔️  Cleanup complete."
+          echo "✔️ Cleanup complete."
