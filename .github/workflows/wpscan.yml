@@ -31,29 +31,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Start WordPress stack and wait for HTTP 200
+      - name: Start WordPress + MySQL via Docker Compose
+        working-directory: .
         run: |
           docker-compose up -d
 
-          echo "Waiting for WordPress to become available on http://localhost:8080 …"
+          echo "Waiting for WordPress on http://localhost:8080 …"
           for i in {1..30}; do
             if curl -sSf http://localhost:8080 >/dev/null; then
-              echo "✔️  WordPress is up (HTTP 200)."
+              echo "✔️ WordPress is up (HTTP 200)."
               break
             fi
-            echo "  → not ready yet (attempt $i/30), retrying in 5s…"
+            echo "  → Not ready yet (attempt $i/30), retrying in 5s…"
             sleep 5
           done
 
           if ! curl -sSf http://localhost:8080 >/dev/null; then
             echo "❌ WordPress did not become available in time."
+            docker-compose logs wordpress || true
             exit 1
           fi
 
-      - name: Install WordPress via WP-CLI (using wordpress:cli)
+      - name: Install WordPress core via WP-CLI
         run: |
+          # Grab the running WordPress container ID
           WP_CONTAINER=$(docker-compose ps -q wordpress)
 
+          # Run WP-CLI inside the same network namespace as the WP container
           docker run --rm \
             --volumes-from "$WP_CONTAINER" \
             --network "container:$WP_CONTAINER" \
@@ -63,34 +67,41 @@ jobs:
             -e WORDPRESS_DB_NAME="wordpress" \
             wordpress:cli \
               wp core install \
-                --url="http://localhost:8080" \
+                --url="http://localhost" \
                 --title="Test Site" \
                 --admin_user="${WP_ADMIN_USER}" \
                 --admin_password="${WP_ADMIN_PASSWORD}" \
-                --admin_email="${WP_ADMIN_EMAIL}"
+                --admin_email="${WP_ADMIN_EMAIL}" \
+                --allow-root
 
-          echo "✔️  WordPress installed (admin user: ${WP_ADMIN_USER})."
+          echo "✔️ WordPress installed (admin user: ${WP_ADMIN_USER})."
 
-      - name: Install a vulnerable plugin (Contact Form 7 v3.5)
+      - name: Install vulnerable plugin (Contact Form 7 v3.5)
         run: |
           WP_CONTAINER=$(docker-compose ps -q wordpress)
 
-          # Contact Form 7 v3.5 is known to have multiple vulnerabilities.
-          docker exec "$WP_CONTAINER" bash -lc "wp plugin install contact-form-7 --version=3.5 --activate --allow-root"
+          docker run --rm \
+            --volumes-from "$WP_CONTAINER" \
+            --network "container:$WP_CONTAINER" \
+            wordpress:cli \
+              wp plugin install contact-form-7 --version=3.5 --activate --allow-root
 
-          echo "✔️  Installed Contact Form 7 v3.5 (vulnerable)."
+          echo "✔️ Installed Contact Form 7 v3.5"
 
-      - name: Run WPScan against http://localhost:8080
+      - name: Run WPScan against the local site
         run: |
-          docker run --rm --network host \
+          WP_CONTAINER=$(docker-compose ps -q wordpress)
+
+          docker run --rm \
+            --network "container:$WP_CONTAINER" \
             -e WPSCAN_API_TOKEN="${WPSCAN_API_TOKEN}" \
             wpscanteam/wpscan:latest \
-              --url http://host.docker.internal:8080 \
+              --url http://localhost \
               --api-token "${WPSCAN_API_TOKEN}" \
               --enumerate ap,at,u \
               --disable-tls-checks
 
-
       - name: Tear down Docker Compose
         if: ${{ always() }}
-        run: docker-compose down
+        run: |
+          docker-compose down --volumes
