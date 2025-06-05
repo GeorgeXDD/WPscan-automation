@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  db:
+  db1:
     image: mysql:5.7
     restart: always
     environment:
@@ -10,20 +10,45 @@ services:
       MYSQL_PASSWORD: "${DB_PASSWORD}"
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
     volumes:
-      - db_data:/var/lib/mysql
+      - db1_data:/var/lib/mysql
 
-  wordpress:
+  wordpress1:
     image: wordpress:latest
     depends_on:
-      - db
+      - db1
     ports:
       - "8080:80"
     restart: always
     environment:
-      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_HOST: db1:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: "${DB_PASSWORD}"
+      WORDPRESS_DB_NAME: wordpress
+
+  db2:
+    image: mysql:5.7
+    restart: always
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: "${DB_PASSWORD}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+    volumes:
+      - db2_data:/var/lib/mysql
+
+  wordpress2:
+    image: wordpress:latest
+    depends_on:
+      - db2
+    ports:
+      - "8081:80"
+    restart: always
+    environment:
+      WORDPRESS_DB_HOST: db2:3306
       WORDPRESS_DB_USER: wordpress
       WORDPRESS_DB_PASSWORD: "${DB_PASSWORD}"
       WORDPRESS_DB_NAME: wordpress
 
 volumes:
-  db_data:
+  db1_data:
+  db2_data:
