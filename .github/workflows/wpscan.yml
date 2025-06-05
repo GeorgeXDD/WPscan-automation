@@ -36,50 +36,51 @@ jobs:
         run: |
           docker-compose up -d
 
-          echo "Waiting for WordPress on http://localhost:8080 …"
-          for i in {1..30}; do
-            if curl -sSf http://localhost:8080 >/dev/null; then
-              echo "✔️  WordPress HTTP 200 reached."
-              break
-            fi
-            echo "  → Not ready yet (attempt $i/30), retrying in 5s…"
-            sleep 5
-          done
-
-          if ! curl -sSf http://localhost:8080 >/dev/null; then
-            echo "❌ WordPress did not become available in time."
-            docker-compose logs wordpress || true
-            exit 1
-          fi
-
-          # Now wait for MySQL itself to be accepting connections
+          # 1) Wait for MySQL to be fully ready
           DB_CONTAINER=$(docker-compose ps -q db)
-          echo "Waiting for MySQL to be ready inside container $DB_CONTAINER …"
-          for i in {1..30}; do
+          echo "Waiting for MySQL inside container $DB_CONTAINER …"
+          for i in {1..60}; do
+            # mysqladmin ping uses socket by default when run inside the container
             if docker exec "$DB_CONTAINER" \
-                  mysqladmin ping -h localhost \
-                  -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
-              echo "✔️  MySQL is up and accepting connections."
+                 mysqladmin ping -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
+              echo "✔️  MySQL is up (responding to mysqladmin ping)."
               break
             fi
-            echo "  → MySQL not ready yet (attempt $i/30), retrying in 5s…"
+            echo "  → MySQL not ready yet (attempt $i/60), retrying in 5s…"
             sleep 5
           done
 
           if ! docker exec "$DB_CONTAINER" \
-                      mysqladmin ping -h localhost \
-                      -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
-            echo "❌ MySQL did not become available in time."
+                      mysqladmin ping -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
+            echo "❌ MySQL did not become ready in time."
             docker-compose logs db || true
+            exit 1
+          fi
+
+          # 2) (Optional) Wait until WordPress+PHP actually serve a page—but only after DB is ready.
+          echo "Waiting for WordPress HTTP/200 on http://localhost:8080 …"
+          for i in {1..30}; do
+            if curl -sSf http://localhost:8080 >/dev/null; then
+              echo "✔️  WordPress HTTP/200 reached."
+              break
+            fi
+            echo "  → WordPress still not serving (attempt $i/30), retrying in 5s…"
+            sleep 5
+          done
+
+          if ! curl -sSf http://localhost:8080 >/dev/null; then
+            echo "❌ WordPress front-end did not serve HTTP/200 in time."
+            docker-compose logs wordpress || true
             exit 1
           fi
 
       - name: Install WordPress core via WP-CLI
         run: |
-          # Grab the running WordPress container ID
+          docker ps --filter "ancestor=wordpress:latest" --format "{{.Names}}"
+          
           WP_CONTAINER=$(docker-compose ps -q wordpress)
 
-          # Run WP-CLI inside the same network namespace as the WP container
+          # Now that MySQL is ready, run wp core install (inside the WP container network).
           docker run --rm \
             --volumes-from "$WP_CONTAINER" \
             --network "container:$WP_CONTAINER" \
@@ -97,6 +98,17 @@ jobs:
                 --allow-root
 
           echo "✔️  WordPress installed (admin user: ${WP_ADMIN_USER})."
+
+      - name: (Optional) Verify WP front-end again
+        run: |
+          echo "Verifying WordPress is still serving after install…"
+          if curl -sSf http://localhost:8080 >/dev/null; then
+            echo "✔️  WordPress front-end confirmed."
+          else
+            echo "❌ WordPress still not serving after install—something’s wrong."
+            docker-compose logs wordpress || true
+            exit 1
+          fi
 
       - name: Install vulnerable plugin (Contact Form 7 v3.5)
         run: |
