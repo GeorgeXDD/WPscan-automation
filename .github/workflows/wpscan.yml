@@ -36,17 +36,19 @@ jobs:
         run: |
           docker-compose up -d
 
+          # Show which containers are running, for debugging
+          docker-compose ps
+
           # 1) Wait for MySQL to be fully ready
           DB_CONTAINER=$(docker-compose ps -q db)
-          echo "Waiting for MySQL inside container $DB_CONTAINER …"
+          echo "→ Waiting for MySQL inside container $DB_CONTAINER …"
           for i in {1..60}; do
-            # mysqladmin ping uses socket by default when run inside the container
             if docker exec "$DB_CONTAINER" \
                  mysqladmin ping -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; then
               echo "✔️  MySQL is up (responding to mysqladmin ping)."
               break
             fi
-            echo "  → MySQL not ready yet (attempt $i/60), retrying in 5s…"
+            echo "  → MySQL not ready (attempt $i/60), retrying in 5s…"
             sleep 5
           done
 
@@ -57,14 +59,14 @@ jobs:
             exit 1
           fi
 
-          # 2) (Optional) Wait until WordPress+PHP actually serve a page—but only after DB is ready.
-          echo "Waiting for WordPress HTTP/200 on http://localhost:8080 …"
+          # 2) Wait for WordPress+PHP to serve HTTP/200 on port 8080
+          echo "→ Waiting for WordPress front-end on http://localhost:8080 …"
           for i in {1..30}; do
             if curl -sSf http://localhost:8080 >/dev/null; then
               echo "✔️  WordPress HTTP/200 reached."
               break
             fi
-            echo "  → WordPress still not serving (attempt $i/30), retrying in 5s…"
+            echo "  → Not serving yet (attempt $i/30), retrying in 5s…"
             sleep 5
           done
 
@@ -74,56 +76,59 @@ jobs:
             exit 1
           fi
 
+      - name: Install WP-CLI inside the WordPress container
+        run: |
+          WP_CONTAINER=$(docker-compose ps -q wordpress)
+          echo "→ Installing WP-CLI inside wordpress container ($WP_CONTAINER) …"
+
+          # Using docker-compose exec -T to avoid TTY issues in Actions
+          docker-compose exec -T wordpress bash -lc "\
+            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
+            chmod +x wp-cli.phar && \
+            mv wp-cli.phar /usr/local/bin/wp && \
+            wp --info \
+          "
+          echo "✔️  WP-CLI is now installed inside the WordPress container."
+
       - name: Install WordPress core via WP-CLI
         run: |
-          docker ps --filter "ancestor=wordpress:latest" --format "{{.Names}}"
-          
-          WP_CONTAINER=$(docker-compose ps -q wordpress)
+          echo "→ Running wp core install…"
 
-          # Now that MySQL is ready, run wp core install (inside the WP container network).
-          docker run --rm \
-            --volumes-from "$WP_CONTAINER" \
-            --network "container:$WP_CONTAINER" \
-            -e WORDPRESS_DB_HOST="db:3306" \
-            -e WORDPRESS_DB_USER="wordpress" \
-            -e WORDPRESS_DB_PASSWORD="${DB_PASSWORD}" \
-            -e WORDPRESS_DB_NAME="wordpress" \
-            wordpress:cli \
-              wp core install \
-                --url="http://localhost" \
-                --title="Test Site" \
-                --admin_user="${WP_ADMIN_USER}" \
-                --admin_password="${WP_ADMIN_PASSWORD}" \
-                --admin_email="${WP_ADMIN_EMAIL}" \
-                --allow-root
-
+          # “docker-compose exec” will run inside the same network as 'db' because
+          # docker-compose automatically attaches each service to a user-defined network.
+          docker-compose exec -T wordpress bash -lc "\
+            wp core install \
+              --url=http://localhost \
+              --title='Test Site' \
+              --admin_user='${WP_ADMIN_USER}' \
+              --admin_password='${WP_ADMIN_PASSWORD}' \
+              --admin_email='${WP_ADMIN_EMAIL}' \
+              --allow-root \
+          "
           echo "✔️  WordPress installed (admin user: ${WP_ADMIN_USER})."
 
-      - name: (Optional) Verify WP front-end again
+      - name: (Optional) Verify WordPress front-end again
         run: |
-          echo "Verifying WordPress is still serving after install…"
+          echo "→ Verifying that WordPress still serves…"
           if curl -sSf http://localhost:8080 >/dev/null; then
             echo "✔️  WordPress front-end confirmed."
           else
-            echo "❌ WordPress still not serving after install—something’s wrong."
+            echo "❌ WordPress is not serving after install—dumping logs:"
             docker-compose logs wordpress || true
             exit 1
           fi
 
       - name: Install vulnerable plugin (Contact Form 7 v3.5)
         run: |
-          WP_CONTAINER=$(docker-compose ps -q wordpress)
-
-          docker run --rm \
-            --volumes-from "$WP_CONTAINER" \
-            --network "container:$WP_CONTAINER" \
-            wordpress:cli \
-              wp plugin install contact-form-7 --version=3.5 --activate --allow-root
-
-          echo "✔️  Installed Contact Form 7 v3.5"
+          echo "→ Installing Contact Form 7 v3.5 …"
+          docker-compose exec -T wordpress bash -lc "\
+            wp plugin install contact-form-7 --version=3.5 --activate --allow-root \
+          "
+          echo "✔️  Installed Contact Form 7 v3.5 (vulnerable)."
 
       - name: Run WPScan against the local site
         run: |
+          echo "→ Running WPScan …"
           WP_CONTAINER=$(docker-compose ps -q wordpress)
 
           docker run --rm \
@@ -139,3 +144,4 @@ jobs:
         if: ${{ always() }}
         run: |
           docker-compose down --volumes
+          echo "✔️  Cleanup complete."
